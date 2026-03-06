@@ -1,34 +1,35 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import type { Facility } from './types'
+import SearchBar from './components/SearchBar'
+import SearchResults from './components/SearchResults'
 
 function App() {
-  const [count, setCount] = useState(0)
+  const [results, setResults] = useState<Facility[]>([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleSearch = async (query: string) => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`/search?q=${encodeURIComponent(query)}`)
+      if (!res.ok) throw new Error(`Server error: ${res.status}`)
+      const data: Facility[] = await res.json()
+      setResults(data)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Unknown error')
+    } finally {
+      setLoading(false)
+    }
+  }
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <div style={{ fontFamily: 'sans-serif', maxWidth: 800, margin: '2rem auto', padding: '0 1rem' }}>
+      <h1>Colorado Campgrounds</h1>
+      <SearchBar onSearch={handleSearch} loading={loading} />
+      {error && <p style={{ color: 'red' }}>{error}</p>}
+      <SearchResults results={results} />
+    </div>
   )
 }
 
