@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Facility } from './types'
 import SearchBar from './components/SearchBar/SearchBar'
 import SearchResults from './components/SearchResults/SearchResults'
@@ -9,6 +9,7 @@ function App() {
   const [results, setResults] = useState<Facility[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [currentQuery, setCurrentQuery] = useState("")
   
   // App-level filter state
   const [filters, setFilters] = useState<FilterValues>({
@@ -20,32 +21,45 @@ function App() {
   })
 
   const handleSearch = async (query: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      let url = `/search?q=${encodeURIComponent(query)}`
-      if (filters.state) url += `&state=${encodeURIComponent(filters.state)}`
-      if (filters.facilityType) url += `&facility_type=${encodeURIComponent(filters.facilityType)}`
-      if (filters.lat !== null && filters.lon !== null) {
-        url += `&lat=${filters.lat}&lon=${filters.lon}&radius_miles=${filters.radius}`
-      }
-
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`Server error: ${res.status}`)
-      const data: Facility[] = await res.json()
-      setResults(data)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Unknown error')
-    } finally {
-      setLoading(false)
-    }
+    setCurrentQuery(query)
   }
+
+  useEffect(() => {
+    // Optional: Prevent it from fetching on initial page load if everything is blank
+    if (currentQuery === '' && !filters.state && !filters.facilityType && filters.lat === null) {
+      return; 
+    }
+
+    const fetchResults = async () => {
+      setLoading(true)
+      setError(null)
+      try {
+        let url = `/search?q=${encodeURIComponent(currentQuery)}`
+        if (filters.state) url += `&state=${encodeURIComponent(filters.state)}`
+        if (filters.facilityType) url += `&facility_type=${encodeURIComponent(filters.facilityType)}`
+        if (filters.lat !== null && filters.lon !== null) {
+          url += `&lat=${filters.lat}&lon=${filters.lon}&radius_miles=${filters.radius}`
+        }
+
+        const res = await fetch(url)
+        if (!res.ok) throw new Error(`Server error: ${res.status}`)
+        const data: Facility[] = await res.json()
+        setResults(data)
+      } catch (e) {
+        setError(e instanceof Error ? e.message : 'Unknown error')
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchResults()
+  }, [filters, currentQuery])
 
   return (
     <div className="app-layout">
       <header className="app-header">
         <div className="header-glass">
-          <h1>Outrider Facilities</h1>
+          <h1>Outrider</h1>
           <p>Find your next outdoor adventure basecamp.</p>
         </div>
       </header>

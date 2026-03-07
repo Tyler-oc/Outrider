@@ -1,10 +1,11 @@
 use std::sync::LazyLock;
 
 use backend::embedding::EmbeddingModel;
+use chrono::NaiveDate;
 use pgvector::Vector;
 use regex::Regex;
 use serde::Deserialize;
-use sqlx::PgPool;
+use sqlx::{PgPool, Row};
 
 // ---------------------------------------------------------------------------
 // Unified error type
@@ -61,10 +62,15 @@ struct RidbFacility {
 
     #[serde(rename = "FacilityTypeDescription", default)]
     facility_type: String,
+
+    // Raw date string from the API, e.g. "2024-03-15" or "2024-03-15T00:00:00Z".
+    // We parse it manually rather than relying on serde so we can handle both formats.
+    #[serde(rename = "LastUpdatedDate", default)]
+    last_updated_raw: String,
 }
 
 // ---------------------------------------------------------------------------
-// A clean, flat record ready for insertion
+// A clean, flat record ready for upsert
 // ---------------------------------------------------------------------------
 
 struct FacilityRecord {
@@ -76,7 +82,10 @@ struct FacilityRecord {
     lon: f64,
     is_reservable: bool,
     facility_type: String,
-    state: String,
+    /// None for delta-fetched records where state context is unavailable.
+    /// The DB upsert does not overwrite the stored state, so existing rows keep it.
+    state: Option<String>,
+    last_updated: NaiveDate,
 }
 
 // ---------------------------------------------------------------------------
@@ -92,7 +101,48 @@ fn strip_html(raw: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// RIDB API fetching — paginates until all facilities across all states are retrieved
+// Date parsing — handles both "YYYY-MM-DD" and "YYYY-MM-DDTHH:MM:SSZ"
+// Falls back to today's date so the record is still ingested.
+// ---------------------------------------------------------------------------
+
+fn parse_date(s: &str) -> NaiveDate {
+    let s = s.trim();
+    NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .or_else(|_| {
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%SZ").map(|dt| dt.date())
+        })
+        .unwrap_or_else(|_| chrono::Local::now().date_naive())
+}
+
+// ---------------------------------------------------------------------------
+// Convert a raw API record into an insertion-ready FacilityRecord.
+// `state` is Some("CO") for full-fetch records, None for delta-fetch records.
+// ---------------------------------------------------------------------------
+
+fn to_record(f: RidbFacility, state: Option<&str>) -> FacilityRecord {
+    let clean_desc = strip_html(&f.description);
+    let embedding_text = format!("{} {} {}", f.name, clean_desc, f.keywords);
+    let last_updated = if f.last_updated_raw.is_empty() {
+        chrono::Local::now().date_naive()
+    } else {
+        parse_date(&f.last_updated_raw)
+    };
+    FacilityRecord {
+        id: f.id,
+        name: f.name,
+        description: clean_desc,
+        embedding_text,
+        lat: f.lat,
+        lon: f.lon,
+        is_reservable: f.is_reservable,
+        facility_type: f.facility_type,
+        state: state.map(|s| s.to_string()),
+        last_updated,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HTTP helpers
 // ---------------------------------------------------------------------------
 
 const STATES: &[&str] = &[
@@ -102,14 +152,24 @@ const STATES: &[&str] = &[
     "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 ];
 
-async fn fetch_all_facilities(api_key: &str) -> SeedResult<Vec<FacilityRecord>> {
+async fn fetch_page(client: &reqwest::Client, url: &str) -> SeedResult<RidbPayload> {
+    let resp = client.get(url).send().await?;
+    if !resp.status().is_success() {
+        return Err(format!("RIDB API returned {}", resp.status()).into());
+    }
+    Ok(resp.json().await?)
+}
+
+/// Full historical fetch — iterates all 50 states with pagination.
+/// Used when the DB is empty (no high-water mark).
+async fn fetch_full(api_key: &str) -> SeedResult<Vec<FacilityRecord>> {
     let client = reqwest::Client::new();
     let mut all: Vec<FacilityRecord> = Vec::new();
     let limit = 50usize;
 
     for &state in STATES {
         let mut offset = 0usize;
-        println!("Seeder: fetching facilities for state: {}", state);
+        let mut state_count = 0usize;
 
         loop {
             let url = format!(
@@ -117,45 +177,56 @@ async fn fetch_all_facilities(api_key: &str) -> SeedResult<Vec<FacilityRecord>> 
                  ?state={}&limit={}&offset={}&apikey={}",
                 state, limit, offset, api_key
             );
-
-            let resp = client.get(&url).send().await?;
-            if !resp.status().is_success() {
-                return Err(format!("RIDB API returned {}", resp.status()).into());
-            }
-
-            let payload: RidbPayload = resp.json().await?;
+            let payload = fetch_page(&client, &url).await?;
             let count = payload.records.len();
+            state_count += count;
 
-            let records: Vec<FacilityRecord> = payload
-                .records
-                .into_iter()
-                .map(|f| {
-                    let clean_desc = strip_html(&f.description);
-                    let embedding_text = format!("{} {} {}", f.name, clean_desc, f.keywords);
-                    FacilityRecord {
-                        id: f.id,
-                        name: f.name,
-                        description: clean_desc,
-                        embedding_text,
-                        lat: f.lat,
-                        lon: f.lon,
-                        is_reservable: f.is_reservable,
-                        facility_type: f.facility_type,
-                        state: state.to_string(),
-                    }
-                })
-                .collect();
-
-            all.extend(records);
+            all.extend(payload.records.into_iter().map(|f| to_record(f, Some(state))));
 
             if count < limit {
                 break;
             }
             offset += limit;
         }
+
+        println!(
+            "Seeder: [full] {} — {} facilities ({} total)",
+            state,
+            state_count,
+            all.len()
+        );
     }
 
-    println!("Seeder: {} total facilities fetched", all.len());
+    Ok(all)
+}
+
+/// Delta fetch — queries only records updated on or after `since`, across all states.
+/// Used when we have an existing high-water mark in the DB.
+async fn fetch_delta(api_key: &str, since: NaiveDate) -> SeedResult<Vec<FacilityRecord>> {
+    let client = reqwest::Client::new();
+    let mut all: Vec<FacilityRecord> = Vec::new();
+    let mut offset = 0usize;
+    let limit = 50usize;
+    let since_str = since.format("%Y-%m-%d").to_string();
+
+    loop {
+        let url = format!(
+            "https://ridb.recreation.gov/api/v1/facilities\
+             ?lastupdated={}&limit={}&offset={}&apikey={}",
+            since_str, limit, offset, api_key
+        );
+        let payload = fetch_page(&client, &url).await?;
+        let count = payload.records.len();
+
+        // State is unknown in delta context; the upsert preserves the stored value.
+        all.extend(payload.records.into_iter().map(|f| to_record(f, None)));
+
+        if count < limit {
+            break;
+        }
+        offset += limit;
+    }
+
     Ok(all)
 }
 
@@ -184,54 +255,86 @@ async fn run_schema(pool: &PgPool) -> SeedResult<()> {
             lon           FLOAT8,
             is_reservable BOOLEAN,
             type          TEXT,
-            state         TEXT
+            state         TEXT,
+            last_updated  DATE
         )",
     )
     .execute(pool)
     .await?;
 
-    // Add columns introduced after the initial schema — safe no-op if they already exist.
-    sqlx::query("ALTER TABLE facilities ADD COLUMN IF NOT EXISTS state TEXT")
-        .execute(pool)
-        .await?;
+    // Migrations for columns added after the initial schema.
+    for sql in [
+        "ALTER TABLE facilities ADD COLUMN IF NOT EXISTS state TEXT",
+        "ALTER TABLE facilities ADD COLUMN IF NOT EXISTS last_updated DATE",
+    ] {
+        sqlx::query(sql).execute(pool).await?;
+    }
 
     Ok(())
 }
 
-async fn seed(
+/// Returns the most recent `last_updated` date in the DB, or None if the
+/// table is empty. This is the high-water mark that drives delta vs full sync.
+async fn get_high_water_mark(pool: &PgPool) -> SeedResult<Option<NaiveDate>> {
+    let row = sqlx::query("SELECT MAX(last_updated) AS hwm FROM facilities")
+        .fetch_one(pool)
+        .await?;
+    Ok(row.get("hwm"))
+}
+
+/// Embeds each record and upserts it into the DB.
+/// Commits in batches of BATCH_SIZE to bound transaction memory and give
+/// progress feedback during long initial loads.
+async fn upsert(
     pool: &PgPool,
     records: &[FacilityRecord],
     model: &mut EmbeddingModel,
 ) -> SeedResult<usize> {
-    let mut tx = pool.begin().await?;
-    let mut inserted = 0usize;
+    const BATCH_SIZE: usize = 500;
+    let mut total_upserted = 0usize;
 
-    for r in records {
-        let embedding = Vector::from(model.embed(&r.embedding_text)?);
+    for (batch_idx, chunk) in records.chunks(BATCH_SIZE).enumerate() {
+        let mut tx = pool.begin().await?;
 
-        let rows_affected = sqlx::query(
-            "INSERT INTO facilities (id, name, description, embedding, lat, lon, is_reservable, type, state)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-             ON CONFLICT (id) DO NOTHING",
-        )
-        .bind(&r.id)
-        .bind(&r.name)
-        .bind(&r.description)
-        .bind(embedding)
-        .bind(r.lat)
-        .bind(r.lon)
-        .bind(r.is_reservable)
-        .bind(&r.facility_type)
-        .bind(&r.state)
-        .execute(&mut *tx)
-        .await?
-        .rows_affected();
+        for r in chunk {
+            let embedding = Vector::from(model.embed(&r.embedding_text)?);
 
-        inserted += rows_affected as usize;
+            sqlx::query(
+                "INSERT INTO facilities
+                    (id, name, description, embedding, lat, lon, is_reservable, type, state, last_updated)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                 ON CONFLICT (id) DO UPDATE SET
+                    name         = EXCLUDED.name,
+                    description  = EXCLUDED.description,
+                    embedding    = EXCLUDED.embedding,
+                    last_updated = EXCLUDED.last_updated",
+            )
+            .bind(&r.id)
+            .bind(&r.name)
+            .bind(&r.description)
+            .bind(embedding)
+            .bind(r.lat)
+            .bind(r.lon)
+            .bind(r.is_reservable)
+            .bind(&r.facility_type)
+            .bind(&r.state)
+            .bind(r.last_updated)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        total_upserted += chunk.len();
+
+        println!(
+            "Seeder: batch {} committed — {}/{} records processed",
+            batch_idx + 1,
+            total_upserted,
+            records.len()
+        );
     }
 
-    tx.commit().await?;
-    Ok(inserted)
+    Ok(total_upserted)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,6 +388,32 @@ mod tests {
         assert_eq!(strip_html("just plain text"), "just plain text");
     }
 
+    // --- parse_date ---
+
+    #[test]
+    fn test_parse_date_iso_date() {
+        let d = parse_date("2024-03-15");
+        assert_eq!(d, NaiveDate::from_ymd_opt(2024, 3, 15).unwrap());
+    }
+
+    #[test]
+    fn test_parse_date_iso_datetime() {
+        let d = parse_date("2024-03-15T00:00:00Z");
+        assert_eq!(d, NaiveDate::from_ymd_opt(2024, 3, 15).unwrap());
+    }
+
+    #[test]
+    fn test_parse_date_invalid_falls_back_to_today() {
+        let d = parse_date("not-a-date");
+        assert_eq!(d, chrono::Local::now().date_naive());
+    }
+
+    #[test]
+    fn test_parse_date_trims_whitespace() {
+        let d = parse_date("  2024-06-01  ");
+        assert_eq!(d, NaiveDate::from_ymd_opt(2024, 6, 1).unwrap());
+    }
+
     // --- JSON deserialization ---
 
     #[test]
@@ -297,7 +426,8 @@ mod tests {
             "FacilityLatitude": 39.1834,
             "FacilityLongitude": -104.8612,
             "FacilityReservable": true,
-            "FacilityTypeDescription": "Campground"
+            "FacilityTypeDescription": "Campground",
+            "LastUpdatedDate": "2024-03-15"
         });
         let f: RidbFacility = serde_json::from_value(json).unwrap();
         assert_eq!(f.id, "233115");
@@ -306,6 +436,7 @@ mod tests {
         assert!((f.lon - -104.8612).abs() < 1e-6);
         assert!(f.is_reservable);
         assert_eq!(f.facility_type, "Campground");
+        assert_eq!(f.last_updated_raw, "2024-03-15");
     }
 
     /// The real RIDB API sometimes omits optional fields — serde defaults must fill them in.
@@ -323,6 +454,7 @@ mod tests {
         assert_eq!(f.lon, 0.0);
         assert!(!f.is_reservable);
         assert_eq!(f.facility_type, "");
+        assert_eq!(f.last_updated_raw, "");
     }
 
     #[test]
@@ -349,15 +481,60 @@ mod tests {
         assert_eq!(payload.records[1].id, "2");
     }
 
-    // --- embedding_text construction ---
+    // --- to_record ---
 
     #[test]
-    fn test_embedding_text_format() {
-        let name = "Test Camp";
-        let clean_desc = strip_html("<p>A nice campground</p>");
-        let keywords = "camping hiking";
-        let text = format!("{} {} {}", name, clean_desc, keywords);
-        assert_eq!(text, "Test Camp A nice campground camping hiking");
+    fn test_to_record_strips_html_and_builds_embedding_text() {
+        let f = RidbFacility {
+            id: "1".into(),
+            name: "Test Camp".into(),
+            description: "<p>A nice campground</p>".into(),
+            keywords: "camping hiking".into(),
+            lat: 0.0,
+            lon: 0.0,
+            is_reservable: false,
+            facility_type: "Campground".into(),
+            last_updated_raw: "2024-01-01".into(),
+        };
+        let r = to_record(f, Some("CO"));
+        assert_eq!(r.description, "A nice campground");
+        assert_eq!(r.embedding_text, "Test Camp A nice campground camping hiking");
+        assert_eq!(r.state.as_deref(), Some("CO"));
+        assert_eq!(r.last_updated, NaiveDate::from_ymd_opt(2024, 1, 1).unwrap());
+    }
+
+    #[test]
+    fn test_to_record_none_state_for_delta() {
+        let f = RidbFacility {
+            id: "2".into(),
+            name: "Delta Camp".into(),
+            description: "".into(),
+            keywords: "".into(),
+            lat: 0.0,
+            lon: 0.0,
+            is_reservable: false,
+            facility_type: "".into(),
+            last_updated_raw: "2024-06-01".into(),
+        };
+        let r = to_record(f, None);
+        assert!(r.state.is_none());
+    }
+
+    #[test]
+    fn test_to_record_missing_date_falls_back_to_today() {
+        let f = RidbFacility {
+            id: "3".into(),
+            name: "Camp".into(),
+            description: "".into(),
+            keywords: "".into(),
+            lat: 0.0,
+            lon: 0.0,
+            is_reservable: false,
+            facility_type: "".into(),
+            last_updated_raw: "".into(),
+        };
+        let r = to_record(f, None);
+        assert_eq!(r.last_updated, chrono::Local::now().date_naive());
     }
 
     // --- L2 normalisation ---
@@ -450,25 +627,49 @@ async fn main() -> SeedResult<()> {
 
     let api_key = std::env::var("RIDB_API_KEY").expect("RIDB_API_KEY must be set");
 
-    println!("Seeder: fetching facilities across all states from RIDB API");
-    let records = fetch_all_facilities(&api_key).await?;
-
-    println!("Seeder: loading embedding model");
-    let mut model = EmbeddingModel::load()?;
-    println!("Seeder: model ready");
-
+    // DB must be ready before anything else — schema setup and high-water mark
+    // query both happen before we touch the API or load the model.
     let pool = connect().await?;
     println!("Seeder: connected to database");
 
     run_schema(&pool).await?;
     println!("Seeder: schema ready");
 
-    let inserted = seed(&pool, &records, &mut model).await?;
-    println!(
-        "Seeder: done — {} new rows inserted, {} already existed",
-        inserted,
-        records.len() - inserted
-    );
+    // --- High-water mark ---
+    let hwm = get_high_water_mark(&pool).await?;
+    match hwm {
+        Some(d) => println!("Seeder: high-water mark = {d} — running delta sync"),
+        None => println!("Seeder: no existing data — running full historical sync"),
+    }
+
+    // --- Fetch ---
+    let records = match hwm {
+        Some(since) => {
+            println!("Seeder: fetching records updated since {since}");
+            let r = fetch_delta(&api_key, since).await?;
+            println!("Seeder: {} records returned by delta query", r.len());
+            r
+        }
+        None => {
+            println!("Seeder: fetching all facilities across all states");
+            let r = fetch_full(&api_key).await?;
+            println!("Seeder: {} total facilities fetched", r.len());
+            r
+        }
+    };
+
+    if records.is_empty() {
+        println!("Seeder: nothing to do — database is already up to date");
+        return Ok(());
+    }
+
+    // --- Embed & upsert ---
+    println!("Seeder: loading embedding model");
+    let mut model = EmbeddingModel::load()?;
+    println!("Seeder: model ready — beginning embed + upsert");
+
+    let upserted = upsert(&pool, &records, &mut model).await?;
+    println!("Seeder: done — {upserted} rows upserted");
 
     Ok(())
 }

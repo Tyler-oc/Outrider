@@ -1,15 +1,22 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --bg-color: #121214;
-  --bg-gradient: linear-gradient(135deg, #18181c 0%, #0d0d10 100%);
-  --accent-color: #646cff;
-  --accent-hover: #747bff;
-  --text-main: #f3f3f4;
-  --text-muted: #9ba1a6;
-  --glass-bg: rgba(30, 30, 35, 0.45);
-  --glass-border: rgba(255, 255, 255, 0.1);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  /* Deep forest / night sky background */
+  --bg-color: #0b100d;
+  --bg-gradient: radial-gradient(circle at top right, #1a2620 0%, #0b100d 100%);
+
+  /* Campfire Ember accents */
+  --accent-color: #e67e22;
+  --accent-hover: #d35400;
+
+  /* Earthy text colors */
+  --text-main: #f0f4f1;
+  --text-muted: #8b9d93;
+
+  /* Tinted outdoor glassmorphism */
+  --glass-bg: rgba(20, 30, 24, 0.55);
+  --glass-border: rgba(255, 255, 255, 0.06);
+  --glass-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
 }
 
 body {
@@ -29,36 +36,41 @@ body {
   box-sizing: border-box;
 }
 
-h1, h2, h3, h4, p {
+h1,
+h2,
+h3,
+h4,
+p {
   margin: 0;
 }
 
 .btn-primary {
   background: var(--accent-color);
   color: #fff;
-  border: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   padding: 0.8rem 1.5rem;
   border-radius: 8px;
-  font-weight: 500;
+  font-weight: 600;
   font-size: 1rem;
   cursor: pointer;
-  transition: all 0.2s ease;
-  box-shadow: 0 4px 14px 0 rgba(100, 108, 255, 0.39);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 14px 0 rgba(230, 126, 34, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
   background: var(--accent-hover);
-  box-shadow: 0 6px 20px rgba(100, 108, 255, 0.23);
-  transform: translateY(-1px);
+  box-shadow: 0 6px 20px rgba(211, 84, 0, 0.4);
+  transform: translateY(-2px);
 }
 
 .btn-primary:active:not(:disabled) {
-  transform: translateY(1px);
-  box-shadow: 0 2px 8px rgba(100, 108, 255, 0.39);
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(211, 84, 0, 0.3);
 }
 
 .btn-primary:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
   box-shadow: none;
+  transform: none;
 }

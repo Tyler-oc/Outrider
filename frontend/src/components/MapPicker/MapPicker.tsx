@@ -3,16 +3,14 @@ import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import './MapPicker.css'
 
-// Fix default icons in React-Leaflet
-import icon from 'leaflet/dist/images/marker-icon.png'
-import iconShadow from 'leaflet/dist/images/marker-shadow.png'
-
-const DefaultIcon = L.icon({
-  iconUrl: icon,
-  shadowUrl: iconShadow,
-  iconAnchor: [12, 41]
+// We don't need the default blue PNGs anymore! 
+// We will create a custom HTML marker that uses our CSS theme colors.
+const customMarkerIcon = L.divIcon({
+  className: 'custom-map-pin',
+  html: `<div class="pin-head"></div><div class="pin-point"></div>`,
+  iconSize: [24, 34],
+  iconAnchor: [12, 34]
 })
-L.Marker.prototype.options.icon = DefaultIcon
 
 interface Props {
   position: [number, number] | null
@@ -27,7 +25,7 @@ function LocationMarker({ position, onChange }: Props) {
   })
 
   return position === null ? null : (
-    <Marker position={position}></Marker>
+    <Marker position={position} icon={customMarkerIcon} />
   )
 }
 
@@ -42,9 +40,10 @@ export default function MapPicker({ position, onChange }: Props) {
         scrollWheelZoom={true} 
         style={{ height: '100%', width: '100%', borderRadius: 'inherit' }}
       >
+        {/* Swapped to CartoDB Dark Matter tiles for a sleek dark mode look */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
         />
         <LocationMarker position={position} onChange={onChange} />
       </MapContainer>

@@ -1,53 +1,96 @@
 .result-card {
   background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--glass-border);
-  border-radius: 12px;
-  padding: 1.5rem;
-  transition: all 0.2s ease;
+  border-radius: 16px;
+  padding: 1.75rem;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--glass-shadow);
+  position: relative;
+  overflow: hidden;
+}
+
+/* Subtle campfire orange indicator line at the bottom */
+.result-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: var(--accent-color);
+  opacity: 0;
+  transition: opacity 0.3s ease;
 }
 
 .result-card:hover {
-  transform: translateY(-2px);
-  border-color: rgba(255, 255, 255, 0.2);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
-  background: rgba(40, 40, 45, 0.55);
+  transform: translateY(-3px);
+  border-color: rgba(230, 126, 34, 0.3);
+  /* Subtle orange border on hover */
+  background: rgba(20, 30, 24, 0.75);
+  /* Deeper pine background */
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+}
+
+.result-card:hover::after {
+  opacity: 1;
 }
 
 .card-header {
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  gap: 1rem;
+}
+
+.title-wrapper {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.facility-icon {
+  width: 22px;
+  height: 22px;
+  color: var(--accent-color);
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  /* Visually align with the text baseline */
 }
 
 .card-title {
-  color: #fff;
-  font-size: 1.3rem;
+  color: var(--text-main);
+  font-size: 1.35rem;
   font-weight: 600;
   line-height: 1.3;
+  margin: 0;
 }
 
 .card-id {
   font-size: 0.75rem;
-  background: rgba(255, 255, 255, 0.1);
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  color: #aaa;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 0.3rem 0.6rem;
+  border-radius: 6px;
+  color: var(--text-muted);
   white-space: nowrap;
+  font-weight: 500;
+  letter-spacing: 0.5px;
 }
 
 .card-desc {
   color: var(--text-muted);
   font-size: 1rem;
-  line-height: 1.5;
+  line-height: 1.6;
+  /* Clamp the text to exactly 3 lines to keep the UI clean */
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .card-desc p {
-  margin-bottom: 0.5rem;
-}
-
-.card-desc p:last-child {
-  margin-bottom: 0;
+  margin: 0;
 }

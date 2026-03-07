@@ -9,7 +9,11 @@ interface Props {
 export default function SearchResults({ results }: Props) {
   if (results.length === 0) return (
     <div className="empty-results">
-      <p>No facilities found. Try adjusting your filters or search query.</p>
+      <svg className="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10"></circle>
+        <polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"></polygon>
+      </svg>
+      <p>No basecamps found in this area. Try adjusting your filters or moving your pin.</p>
     </div>
   )
 
