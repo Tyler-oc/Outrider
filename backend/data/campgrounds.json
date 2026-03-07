@@ -1,0 +1,64 @@
+{
+  "RECDATA": [
+    {
+      "FacilityID": "233115",
+      "FacilityName": "Rampart Range Campground",
+      "FacilityDescription": "<h2>Overview</h2><p>Rampart Range Campground sits inside the Pike National Forest at 9,200 feet, surrounded by ponderosa pine and rocky outcroppings.<br />Sites accommodate tents and small RVs up to 35 feet. Flush toilets and potable water are available on-site.</p><h2>Activities</h2><p>Hiking, mountain biking, and OHV riding on the Rampart Range Road corridor.<br />Fishing is permitted in nearby Schubarth Creek.</p>",
+      "FacilityKeywords": "camping, tent, RV, hiking, mountain biking, OHV, fishing, Pike National Forest, ponderosa pine, 9200 feet",
+      "FacilityLatitude": 39.1834,
+      "FacilityLongitude": -104.8612,
+      "FacilityReservable": true,
+      "FacilityTypeDescription": "Campground"
+    },
+    {
+      "FacilityID": "251638",
+      "FacilityName": "Stillwater Campground",
+      "FacilityDescription": "<h2>Overview</h2><p>Stillwater Campground is located on the shore of Green Mountain Reservoir in Summit County at an elevation of 7,950 feet.<br />The campground offers stunning views of the Gore Range and direct access to the reservoir.</p><h2>Activities</h2><p>Boating, waterskiing, kayaking, and shore fishing for rainbow trout and kokanee salmon.<br />Nearby trails connect to the Eagles Nest Wilderness.</p>",
+      "FacilityKeywords": "camping, reservoir, boating, waterskiing, kayaking, fishing, trout, kokanee, wilderness, Gore Range, Summit County",
+      "FacilityLatitude": 39.8801,
+      "FacilityLongitude": -106.3317,
+      "FacilityReservable": true,
+      "FacilityTypeDescription": "Campground"
+    },
+    {
+      "FacilityID": "10070942",
+      "FacilityName": "Rifle Falls State Park Campground",
+      "FacilityDescription": "<h2>Overview</h2><p>Camp beneath a rare triple waterfall in western Colorado. The campsite sits adjacent to Rifle Falls, a 70-foot cascading waterfall fed by East Rifle Creek.<br />Limestone caves and lush hanging gardens surround the area.</p><h2>Activities</h2><p>Cave exploration, birdwatching, photography, and swimming in the creek pools.<br />The park connects to Rifle Gap State Park with additional fishing and boating.</p>",
+      "FacilityKeywords": "camping, waterfall, caves, birdwatching, swimming, photography, limestone, western Colorado, state park",
+      "FacilityLatitude": 39.6744,
+      "FacilityLongitude": -107.6978,
+      "FacilityReservable": true,
+      "FacilityTypeDescription": "Campground"
+    },
+    {
+      "FacilityID": "10114486",
+      "FacilityName": "South Rim Campground — Black Canyon",
+      "FacilityDescription": "<h2>Overview</h2><p>South Rim Campground overlooks the dramatic gorge of Black Canyon of the Gunnison National Park.<br />At 8,300 feet, the campground provides electric and non-electric sites with pinyon-juniper woodland setting.</p><h2>Activities</h2><p>Rim hiking, inner canyon climbing, ranger-led programs, and world-class trout fishing in the Gunnison River below.<br />Dark-sky stargazing is exceptional here year-round.</p>",
+      "FacilityKeywords": "camping, national park, canyon, stargazing, climbing, trout fishing, dark sky, pinyon, juniper, Gunnison",
+      "FacilityLatitude": 38.5754,
+      "FacilityLongitude": -107.7416,
+      "FacilityReservable": true,
+      "FacilityTypeDescription": "Campground"
+    },
+    {
+      "FacilityID": "10118870",
+      "FacilityName": "Elbert Creek Campground",
+      "FacilityDescription": "<h2>Overview</h2><p>Elbert Creek Campground is the staging ground for climbers and hikers attempting Mount Elbert, Colorado's highest peak at 14,440 feet.<br />Located in San Isabel National Forest at 10,000 feet along Lake Creek Road.</p><h2>Activities</h2><p>Fourteener summit attempts on Mount Elbert and Mount Massive, creek fishing, and wildlife viewing.<br />Elk and mule deer are frequently spotted in the meadows.</p>",
+      "FacilityKeywords": "camping, fourteener, Mount Elbert, summit, hiking, fishing, elk, mule deer, San Isabel National Forest, 14440",
+      "FacilityLatitude": 39.1202,
+      "FacilityLongitude": -106.4451,
+      "FacilityReservable": false,
+      "FacilityTypeDescription": "Campground"
+    },
+    {
+      "FacilityID": "10119201",
+      "FacilityName": "Mueller State Park — Campground",
+      "FacilityDescription": "<h2>Overview</h2><p>Mueller State Park offers over 130 campsites set among aspen groves and open meadows on the west slope of Pikes Peak.<br />The park spans 5,000 acres with panoramic views of the Sangre de Cristo and Collegiate Peaks.</p><h2>Activities</h2><p>More than 90 miles of trail for hiking, mountain biking, and horseback riding.<br />Wildlife is abundant — black bears, mountain lions, elk, and wild turkeys are resident species.</p>",
+      "FacilityKeywords": "camping, aspen, meadow, Pikes Peak, hiking, mountain biking, horseback, wildlife, bear, elk, turkey, state park",
+      "FacilityLatitude": 38.8844,
+      "FacilityLongitude": -105.1697,
+      "FacilityReservable": true,
+      "FacilityTypeDescription": "Campground"
+    }
+  ]
+}

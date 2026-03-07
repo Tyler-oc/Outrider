@@ -1,4 +1,5 @@
-import { useState, KeyboardEvent } from 'react'
+import { useState } from 'react'
+import type { KeyboardEvent } from 'react'
 
 interface Props {
   onSearch: (query: string) => void

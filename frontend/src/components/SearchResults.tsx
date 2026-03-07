@@ -1,4 +1,4 @@
-import { Facility } from '../types'
+import type { Facility } from '../types'
 import ResultCard from './ResultCard'
 
 interface Props {
