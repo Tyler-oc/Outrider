@@ -20,7 +20,6 @@ RUN mkdir -p src/bin \
 
 # Copy real source and data, then do the real build
 COPY src ./src
-COPY data ./data
 RUN touch src/main.rs src/bin/seed.rs && cargo build --release
 
 # The `ort` crate with download-binaries links against a shared libonnxruntime.
@@ -46,7 +45,6 @@ RUN ldconfig
 
 COPY --from=builder /app/target/release/backend /usr/local/bin/backend
 COPY --from=builder /app/target/release/seed    /usr/local/bin/seed
-COPY --from=builder /app/data                   /app/data
 
 # Download all-MiniLM-L6-v2 ONNX model and tokenizer from HuggingFace.
 # These are fetched at image-build time so the seeder has no outbound

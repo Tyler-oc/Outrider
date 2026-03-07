@@ -1,0 +1,123 @@
+.filters-glass-panel {
+  background: rgba(30, 30, 35, 0.45);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px;
+  padding: 1.5rem;
+  margin-bottom: 2rem;
+  color: #fff;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+}
+
+.filters-glass-panel h3 {
+  margin-top: 0;
+  margin-bottom: 1rem;
+  font-weight: 500;
+  font-size: 1.25rem;
+  letter-spacing: 0.5px;
+}
+
+.filters-glass-panel h4 {
+  margin-top: 1.5rem;
+  margin-bottom: 0.75rem;
+  font-weight: 400;
+  font-size: 1.05rem;
+  color: #ccc;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding-bottom: 0.25rem;
+}
+
+.filters-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+@media (max-width: 600px) {
+  .filters-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.filter-group label {
+  font-size: 0.85rem;
+  color: #aaa;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.filter-group input[type="text"],
+.filter-group select {
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  padding: 0.6rem 0.8rem;
+  color: #fff;
+  font-size: 1rem;
+  transition: all 0.2s ease;
+  outline: none;
+}
+
+.filter-group input[type="text"]:focus,
+.filter-group select:focus {
+  border-color: #646cff;
+  background: rgba(0, 0, 0, 0.4);
+  box-shadow: 0 0 0 2px rgba(100, 108, 255, 0.2);
+}
+
+.filter-group input:disabled,
+.filter-group select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.filter-group select option {
+  background: #2a2a2f;
+  color: #fff;
+}
+
+.filter-group input[type="range"] {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.map-toggle-wrapper {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.btn-secondary {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ddd;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-size: 0.9rem;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  color: #fff;
+}
+
+.pin-text {
+  font-size: 0.9rem;
+  color: #2eeb79;
+}
+
+.apply-btn {
+  margin-top: 1.5rem;
+  width: 100%;
+}

@@ -7,8 +7,7 @@ use serde::Deserialize;
 use sqlx::PgPool;
 
 // ---------------------------------------------------------------------------
-// Unified error type — keeps `?` working across ort, tokenizers, sqlx, and
-// std::io which each return subtly different error wrapper types.
+// Unified error type
 // ---------------------------------------------------------------------------
 
 type SeedResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -17,7 +16,8 @@ type SeedResult<T> = Result<T, Box<dyn std::error::Error + Send + Sync>>;
 // Regex statics — compiled once for the lifetime of the process
 // ---------------------------------------------------------------------------
 
-static TAG_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"<[^>]+>").expect("invalid TAG_RE"));
+static TAG_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<[^>]+>").expect("invalid TAG_RE"));
 
 static ENTITY_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"&(?:[a-zA-Z]+|#\d+);").expect("invalid ENTITY_RE"));
@@ -43,22 +43,23 @@ struct RidbFacility {
     #[serde(rename = "FacilityName")]
     name: String,
 
-    #[serde(rename = "FacilityDescription")]
+    // Optional in the real API — default to empty string when absent/null.
+    #[serde(rename = "FacilityDescription", default)]
     description: String,
 
-    #[serde(rename = "FacilityKeywords")]
+    #[serde(rename = "FacilityKeywords", default)]
     keywords: String,
 
-    #[serde(rename = "FacilityLatitude")]
+    #[serde(rename = "FacilityLatitude", default)]
     lat: f64,
 
-    #[serde(rename = "FacilityLongitude")]
+    #[serde(rename = "FacilityLongitude", default)]
     lon: f64,
 
-    #[serde(rename = "FacilityReservable")]
+    #[serde(rename = "FacilityReservable", default)]
     is_reservable: bool,
 
-    #[serde(rename = "FacilityTypeDescription")]
+    #[serde(rename = "FacilityTypeDescription", default)]
     facility_type: String,
 }
 
@@ -75,6 +76,7 @@ struct FacilityRecord {
     lon: f64,
     is_reservable: bool,
     facility_type: String,
+    state: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +89,74 @@ fn strip_html(raw: &str) -> String {
     WHITESPACE_RE
         .replace_all(no_entities.trim(), " ")
         .into_owned()
+}
+
+// ---------------------------------------------------------------------------
+// RIDB API fetching — paginates until all facilities across all states are retrieved
+// ---------------------------------------------------------------------------
+
+const STATES: &[&str] = &[
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN",
+    "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV",
+    "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN",
+    "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+];
+
+async fn fetch_all_facilities(api_key: &str) -> SeedResult<Vec<FacilityRecord>> {
+    let client = reqwest::Client::new();
+    let mut all: Vec<FacilityRecord> = Vec::new();
+    let limit = 50usize;
+
+    for &state in STATES {
+        let mut offset = 0usize;
+        println!("Seeder: fetching facilities for state: {}", state);
+
+        loop {
+            let url = format!(
+                "https://ridb.recreation.gov/api/v1/facilities\
+                 ?state={}&limit={}&offset={}&apikey={}",
+                state, limit, offset, api_key
+            );
+
+            let resp = client.get(&url).send().await?;
+            if !resp.status().is_success() {
+                return Err(format!("RIDB API returned {}", resp.status()).into());
+            }
+
+            let payload: RidbPayload = resp.json().await?;
+            let count = payload.records.len();
+
+            let records: Vec<FacilityRecord> = payload
+                .records
+                .into_iter()
+                .map(|f| {
+                    let clean_desc = strip_html(&f.description);
+                    let embedding_text = format!("{} {} {}", f.name, clean_desc, f.keywords);
+                    FacilityRecord {
+                        id: f.id,
+                        name: f.name,
+                        description: clean_desc,
+                        embedding_text,
+                        lat: f.lat,
+                        lon: f.lon,
+                        is_reservable: f.is_reservable,
+                        facility_type: f.facility_type,
+                        state: state.to_string(),
+                    }
+                })
+                .collect();
+
+            all.extend(records);
+
+            if count < limit {
+                break;
+            }
+            offset += limit;
+        }
+    }
+
+    println!("Seeder: {} total facilities fetched", all.len());
+    Ok(all)
 }
 
 // ---------------------------------------------------------------------------
@@ -103,12 +173,9 @@ async fn run_schema(pool: &PgPool) -> SeedResult<()> {
         .execute(pool)
         .await?;
 
-    sqlx::query("DROP TABLE IF EXISTS facilities")
-        .execute(pool)
-        .await?;
-
+    // IF NOT EXISTS — safe to re-run; existing rows are preserved.
     sqlx::query(
-        "CREATE TABLE facilities (
+        "CREATE TABLE IF NOT EXISTS facilities (
             id            TEXT PRIMARY KEY,
             name          TEXT NOT NULL,
             description   TEXT NOT NULL,
@@ -116,11 +183,17 @@ async fn run_schema(pool: &PgPool) -> SeedResult<()> {
             lat           FLOAT8,
             lon           FLOAT8,
             is_reservable BOOLEAN,
-            type          TEXT
+            type          TEXT,
+            state         TEXT
         )",
     )
     .execute(pool)
     .await?;
+
+    // Add columns introduced after the initial schema — safe no-op if they already exist.
+    sqlx::query("ALTER TABLE facilities ADD COLUMN IF NOT EXISTS state TEXT")
+        .execute(pool)
+        .await?;
 
     Ok(())
 }
@@ -129,15 +202,16 @@ async fn seed(
     pool: &PgPool,
     records: &[FacilityRecord],
     model: &mut EmbeddingModel,
-) -> SeedResult<()> {
+) -> SeedResult<usize> {
     let mut tx = pool.begin().await?;
+    let mut inserted = 0usize;
 
     for r in records {
         let embedding = Vector::from(model.embed(&r.embedding_text)?);
 
-        sqlx::query(
-            "INSERT INTO facilities (id, name, description, embedding, lat, lon, is_reservable, type)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        let rows_affected = sqlx::query(
+            "INSERT INTO facilities (id, name, description, embedding, lat, lon, is_reservable, type, state)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
              ON CONFLICT (id) DO NOTHING",
         )
         .bind(&r.id)
@@ -148,12 +222,16 @@ async fn seed(
         .bind(r.lon)
         .bind(r.is_reservable)
         .bind(&r.facility_type)
+        .bind(&r.state)
         .execute(&mut *tx)
-        .await?;
+        .await?
+        .rows_affected();
+
+        inserted += rows_affected as usize;
     }
 
     tx.commit().await?;
-    Ok(())
+    Ok(inserted)
 }
 
 // ---------------------------------------------------------------------------
@@ -173,7 +251,6 @@ mod tests {
 
     #[test]
     fn test_strip_html_removes_self_closing_tags() {
-        // <br /> becomes a space, then collapsed
         assert_eq!(strip_html("Line1<br />Line2"), "Line1 Line2");
     }
 
@@ -184,7 +261,6 @@ mod tests {
 
     #[test]
     fn test_strip_html_replaces_entities_with_space() {
-        // Entities are replaced with a space and then collapsed — they are NOT decoded.
         assert_eq!(strip_html("Hello &amp; World"), "Hello World");
         assert_eq!(strip_html("a &lt; b"), "a b");
     }
@@ -232,6 +308,23 @@ mod tests {
         assert_eq!(f.facility_type, "Campground");
     }
 
+    /// The real RIDB API sometimes omits optional fields — serde defaults must fill them in.
+    #[test]
+    fn test_ridb_facility_deserializes_with_missing_optional_fields() {
+        let json = serde_json::json!({
+            "FacilityID": "99999",
+            "FacilityName": "Mystery Camp"
+        });
+        let f: RidbFacility = serde_json::from_value(json).unwrap();
+        assert_eq!(f.id, "99999");
+        assert_eq!(f.description, "");
+        assert_eq!(f.keywords, "");
+        assert_eq!(f.lat, 0.0);
+        assert_eq!(f.lon, 0.0);
+        assert!(!f.is_reservable);
+        assert_eq!(f.facility_type, "");
+    }
+
     #[test]
     fn test_ridb_payload_deserializes_multiple_records() {
         let json = serde_json::json!({
@@ -258,8 +351,6 @@ mod tests {
 
     // --- embedding_text construction ---
 
-    /// Verifies that name, stripped description, and keywords are joined with
-    /// single spaces in the order the main loop uses them.
     #[test]
     fn test_embedding_text_format() {
         let name = "Test Camp";
@@ -271,7 +362,6 @@ mod tests {
 
     // --- L2 normalisation ---
 
-    /// A [3, 4] vector (norm = 5) should become [0.6, 0.8] after normalisation.
     #[test]
     fn test_l2_normalize_scales_to_unit_sphere() {
         let mut v = vec![0.0f32; 384];
@@ -283,16 +373,13 @@ mod tests {
                 *x /= norm;
             }
         }
-        assert!((v[0] - 0.6).abs() < 1e-6, "v[0] should be 0.6");
-        assert!((v[1] - 0.8).abs() < 1e-6, "v[1] should be 0.8");
-        // Remaining dimensions stay zero
+        assert!((v[0] - 0.6).abs() < 1e-6);
+        assert!((v[1] - 0.8).abs() < 1e-6);
         assert!(v[2..].iter().all(|&x| x == 0.0));
-        // Resulting vector must have unit length
         let new_norm: f32 = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-        assert!((new_norm - 1.0).abs() < 1e-6, "norm should be 1.0 after normalisation");
+        assert!((new_norm - 1.0).abs() < 1e-6);
     }
 
-    /// A zero vector (norm = 0) must not be modified — division is skipped.
     #[test]
     fn test_l2_normalize_zero_vector_unchanged() {
         let mut v = vec![0.0f32; 384];
@@ -307,20 +394,16 @@ mod tests {
 
     // --- mean pooling ---
 
-    /// All mask values 1.0: each token contributes equally.
-    /// With 3 tokens each holding a one-hot vector, the mean is [1/3, 1/3, 1/3, 0].
     #[test]
     fn test_mean_pool_uniform_mask() {
-        // 3 tokens, 4 dims — simulates a tiny hidden_state slice
         let hidden: &[f32] = &[
-            1.0, 0.0, 0.0, 0.0, // token 0
-            0.0, 1.0, 0.0, 0.0, // token 1
-            0.0, 0.0, 1.0, 0.0, // token 2
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
         ];
         let mask_f = vec![1.0f32; 3];
         let dims = 4usize;
         let mask_sum: f32 = mask_f.iter().sum();
-
         let mut pooled = vec![0.0f32; dims];
         for (i, &w) in mask_f.iter().enumerate() {
             for d in 0..dims {
@@ -330,7 +413,6 @@ mod tests {
         for x in &mut pooled {
             *x /= mask_sum;
         }
-
         let third = 1.0f32 / 3.0;
         assert!((pooled[0] - third).abs() < 1e-6);
         assert!((pooled[1] - third).abs() < 1e-6);
@@ -338,18 +420,12 @@ mod tests {
         assert_eq!(pooled[3], 0.0);
     }
 
-    /// Mask of [1, 0]: only the first token should contribute.
     #[test]
     fn test_mean_pool_masked_token_excluded() {
-        // 2 tokens, 2 dims
-        let hidden: &[f32] = &[
-            3.0, 6.0, // token 0 (unmasked)
-            9.0, 9.0, // token 1 (masked out)
-        ];
+        let hidden: &[f32] = &[3.0, 6.0, 9.0, 9.0];
         let mask_f = vec![1.0f32, 0.0];
         let dims = 2usize;
-        let mask_sum: f32 = mask_f.iter().sum(); // 1.0
-
+        let mask_sum: f32 = mask_f.iter().sum();
         let mut pooled = vec![0.0f32; dims];
         for (i, &w) in mask_f.iter().enumerate() {
             for d in 0..dims {
@@ -359,8 +435,6 @@ mod tests {
         for x in &mut pooled {
             *x /= mask_sum;
         }
-
-        // Only token 0 contributed, mask_sum = 1, so result == token 0
         assert!((pooled[0] - 3.0).abs() < 1e-6);
         assert!((pooled[1] - 6.0).abs() < 1e-6);
     }
@@ -374,34 +448,10 @@ mod tests {
 async fn main() -> SeedResult<()> {
     dotenvy::dotenv().ok();
 
-    let data_path =
-        std::env::var("SEED_DATA_PATH").unwrap_or_else(|_| "data/campgrounds.json".to_string());
+    let api_key = std::env::var("RIDB_API_KEY").expect("RIDB_API_KEY must be set");
 
-    println!("Seeder: reading {data_path}");
-    let raw = std::fs::read_to_string(&data_path)
-        .unwrap_or_else(|e| panic!("Cannot read {data_path}: {e}"));
-
-    let payload: RidbPayload = serde_json::from_str(&raw)?;
-    println!("Seeder: parsed {} facilities", payload.records.len());
-
-    let records: Vec<FacilityRecord> = payload
-        .records
-        .into_iter()
-        .map(|f| {
-            let clean_desc = strip_html(&f.description);
-            let embedding_text = format!("{} {} {}", f.name, clean_desc, f.keywords);
-            FacilityRecord {
-                id: f.id,
-                name: f.name,
-                description: clean_desc,
-                embedding_text,
-                lat: f.lat,
-                lon: f.lon,
-                is_reservable: f.is_reservable,
-                facility_type: f.facility_type,
-            }
-        })
-        .collect();
+    println!("Seeder: fetching facilities across all states from RIDB API");
+    let records = fetch_all_facilities(&api_key).await?;
 
     println!("Seeder: loading embedding model");
     let mut model = EmbeddingModel::load()?;
@@ -413,8 +463,12 @@ async fn main() -> SeedResult<()> {
     run_schema(&pool).await?;
     println!("Seeder: schema ready");
 
-    seed(&pool, &records, &mut model).await?;
-    println!("Seeder: inserted {} rows — done", records.len());
+    let inserted = seed(&pool, &records, &mut model).await?;
+    println!(
+        "Seeder: done — {} new rows inserted, {} already existed",
+        inserted,
+        records.len() - inserted
+    );
 
     Ok(())
 }

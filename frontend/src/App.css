@@ -1,42 +1,87 @@
-#root {
-  max-width: 1280px;
+.app-layout {
+  max-width: 1200px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 2rem 1.5rem;
+}
+
+.app-header {
+  margin-bottom: 2.5rem;
   text-align: center;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+.header-glass {
+  display: inline-block;
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 20px;
+  padding: 2rem 4rem;
+  box-shadow: var(--glass-shadow);
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+.header-glass h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  background: linear-gradient(135deg, #fff 0%, #a5a5a5 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 0.5rem;
+}
+
+.header-glass p {
+  color: var(--text-muted);
+  font-size: 1.1rem;
+}
+
+.app-main {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+}
+
+.sidebar {
+  flex: 0 0 350px;
+  position: sticky;
+  top: 2rem;
+}
+
+.content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.search-panel {
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  padding: 1.5rem;
+  box-shadow: var(--glass-shadow);
+}
+
+.error-badge {
+  background: rgba(255, 59, 48, 0.15);
+  color: #ff453a;
+  padding: 1rem;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 59, 48, 0.3);
+  text-align: center;
+  font-weight: 500;
+}
+
+@media (max-width: 900px) {
+  .app-main {
+    flex-direction: column;
   }
-  to {
-    transform: rotate(360deg);
+  .sidebar {
+    flex: 1;
+    width: 100%;
+    position: static;
   }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
 }

@@ -5,7 +5,7 @@ use actix_web::{get, web, web::Data, App, HttpResponse, HttpServer, Responder};
 use backend::embedding::EmbeddingModel;
 use pgvector::Vector;
 use serde::{Deserialize, Serialize};
-use sqlx::{PgPool, Row};
+use sqlx::{PgPool, Row, QueryBuilder, Postgres};
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -28,7 +28,7 @@ struct RidbResponse {
 }
 
 #[derive(Debug, Serialize)]
-struct Campground {
+struct FacilityResult {
     id: String,
     name: String,
     description: String,
@@ -37,6 +37,11 @@ struct Campground {
 #[derive(Deserialize)]
 struct SearchQuery {
     q: String,
+    state: Option<String>,
+    facility_type: Option<String>,
+    lat: Option<f64>,
+    lon: Option<f64>,
+    radius_miles: Option<f64>,
 }
 
 // ---------------------------------------------------------------------------
@@ -54,7 +59,7 @@ async fn get_campgrounds() -> impl Responder {
     };
 
     let client = reqwest::Client::new();
-    let mut all_campgrounds: Vec<Campground> = Vec::new();
+    let mut all_campgrounds: Vec<FacilityResult> = Vec::new();
     let mut offset = 0usize;
     let limit = 50usize;
 
@@ -84,7 +89,7 @@ async fn get_campgrounds() -> impl Responder {
 
         let count = body.recdata.len();
         for f in body.recdata {
-            all_campgrounds.push(Campground {
+            all_campgrounds.push(FacilityResult {
                 id: f.facility_id.unwrap_or_default(),
                 name: f.facility_name.unwrap_or_default(),
                 description: f.facility_type_description.unwrap_or_default(),
@@ -130,16 +135,39 @@ async fn search(
         }
     };
 
-    let rows = match sqlx::query(
-        "SELECT id, name, description
-         FROM facilities
-         ORDER BY embedding <=> $1
-         LIMIT 10",
-    )
-    .bind(embedding)
-    .fetch_all(pool.get_ref())
-    .await
-    {
+    let mut builder: QueryBuilder<Postgres> = QueryBuilder::new("SELECT id, name, description FROM facilities WHERE 1=1 ");
+
+    if let Some(state) = &params.state {
+        if !state.is_empty() {
+            builder.push(" AND state = ");
+            builder.push_bind(state.to_uppercase());
+        }
+    }
+
+    if let Some(fatype) = &params.facility_type {
+        if !fatype.is_empty() {
+            builder.push(" AND type ILIKE ");
+            builder.push_bind(format!("%{}%", fatype));
+        }
+    }
+
+    if let (Some(lat), Some(lon), Some(rad)) = (params.lat, params.lon, params.radius_miles) {
+        // Haversine formula directly in PostgreSQL for radius filter in miles
+        builder.push(" AND (3959 * acos(LEAST(1.0, cos(radians(");
+        builder.push_bind(lat);
+        builder.push(")) * cos(radians(lat)) * cos(radians(lon) - radians(");
+        builder.push_bind(lon);
+        builder.push(")) + sin(radians(");
+        builder.push_bind(lat);
+        builder.push(")) * sin(radians(lat))))) <= ");
+        builder.push_bind(rad);
+    }
+
+    builder.push(" ORDER BY embedding <=> ");
+    builder.push_bind(embedding);
+    builder.push(" LIMIT 50");
+
+    let rows = match builder.build().fetch_all(pool.get_ref()).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("DB error: {e}");
@@ -148,9 +176,9 @@ async fn search(
         }
     };
 
-    let results: Vec<Campground> = rows
+    let results: Vec<FacilityResult> = rows
         .iter()
-        .map(|r| Campground {
+        .map(|r| FacilityResult {
             id: r.get("id"),
             name: r.get("name"),
             description: r.get("description"),
@@ -284,11 +312,11 @@ mod tests {
         assert_eq!(r.recdata[1].facility_id.as_deref(), Some("2"));
     }
 
-    // --- Campground serialization ---
+    // --- FacilityResult serialization ---
 
     #[actix_web::test]
     async fn test_campground_serializes_to_json() {
-        let c = Campground {
+        let c = FacilityResult {
             id: "233115".to_string(),
             name: "Rampart Range".to_string(),
             description: "Campground".to_string(),
@@ -299,9 +327,9 @@ mod tests {
         assert_eq!(v["description"], "Campground");
     }
 
-    // --- Campground construction from Facility ---
+    // --- FacilityResult construction from Facility ---
 
-    /// None fields on a Facility must produce empty strings in the Campground,
+    /// None fields on a Facility must produce empty strings in the FacilityResult,
     /// matching the `unwrap_or_default()` calls in the handler.
     #[actix_web::test]
     async fn test_campground_defaults_on_none_facility_fields() {
@@ -313,7 +341,7 @@ mod tests {
             geojson: None,
             addresses: None,
         };
-        let c = Campground {
+        let c = FacilityResult {
             id: f.facility_id.unwrap_or_default(),
             name: f.facility_name.unwrap_or_default(),
             description: f.facility_type_description.unwrap_or_default(),

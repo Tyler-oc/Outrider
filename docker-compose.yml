@@ -18,6 +18,7 @@ services:
     command: seed
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      RIDB_API_KEY: ${RIDB_API_KEY}
     # Never restart — a completed seed is a success, not a crash.
     restart: "no"
     depends_on:
